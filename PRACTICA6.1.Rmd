@@ -1,0 +1,362 @@
+---
+title: "PRACTICA6.1"
+output: html_document
+---
+
+##PRACTICA 6. Series Cronológicas
+
+En este documento se analizarán las bases de datos Datos_ST.csv y ventas.csv correspondientes a los ejercicios realizados en las prácticas.
+
+##EJERCICIO 1
+
+Dada los datos de la serie temporal del fichero Datos_ST.csv extraído del
+Instituto Nacional de Estadística (INE) sobre los costes laborales. La
+base de datos incorpora una serie desde el año 2000 hasta el año 2015,
+contesta a las siguientes preguntas. 
+
+Cargamos las librerías
+```{r}
+library(ggplot2)
+library(dplyr)
+library(zoo)
+```
+
+Leemos los datos
+```{r}
+st <- read.table("Datos_ST.csv", header=T, sep=";")
+head(st)
+
+st$tiempo <- 1:length(st$Codigo)
+head(st)
+```
+
+a) Representa la serie. ¿Qué características aprecias? 
+
+Realizamos el gráfico del tiempo en función del coste
+```{r}
+ggplot(st, aes(tiempo, Coste))+
+  geom_line(color="blue", size=1)+
+  geom_point(color="darkblue", size=1)+
+  theme_minimal()
+```
+
+Observamos que la serie tiene componente estacional y tendencia. En la tendencia observamos cierta curvatura.
+
+b) Calcula el coeficiente de variación para la serie de diferencias
+y también para la serie de cocientes. En función del valor que
+resulta, ¿cuál es el modelo adecuado para combinar Tendencia y
+Estacionalidad: aditivo o multiplicativo? Plantea en consecuencia
+(y escribe) el modelo que regirá en la predicción. 
+```{r}
+st$Diferencia <- c(rep(NA,4), st$Coste[-(1:4)] - st$Coste[1:(nrow(st) - 4)])
+
+st$Cociente <- c(rep(NA,4), st$Coste[-(1:4)] / st$Coste[1:(nrow(st) - 4)])
+
+head(st)
+tail(st)
+
+CV_diferencia <- sd(st$Diferencia, na.rm = T) / mean(st$Diferencia, na.rm = T)
+CV_cocientes <- sd(st$Cociente, na.rm = T) / mean(st$Cociente, na.rm = T)
+
+CV_diferencia
+CV_cocientes
+```
+
+Modelo multiplicativo 
+El CV de los cocientes es el menor de los dos, por tanto, el modelo que ajustaremos es el modelo multilplicativo.
+
+Yti = Tti*IVEI*Iti
+Yti_pred = Tti*IVEi
+
+c)Estima la tendencia de la serie mediante el método de Medias
+Móviles. Representa mediante un gráfico el ajuste de la tendencia
+mediante medias móviles. 
+```{r}
+st$MM4 <- rollmean(st$Coste, k = 4, fill = NA, align = "center")
+
+st$MM4_centrada <- rollmean(st$MM4, k = 2, fill = NA, align = "right")
+head(st)
+tail(st)
+```
+Realizamos la gráfica de los datos y la MMcentrada
+```{r}
+ggplot(st)+
+  geom_line(color="blue", size=1, aes(tiempo, Coste))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Coste))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=MM4_centrada))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=MM4_centrada))+
+  theme_minimal()
+```
+
+La línea roja, tendencia estimada por medias moviles, suaviza las fluctuaciones y permite ver mejor la tendencia.
+
+d)Estima la tendencia de la serie mediante un modelo de regresión
+lineal. Representa mediante un gráfico el ajuste de la tendencia.
+```{r}
+media_por_anyo <- st %>% 
+  group_by(Anyo) %>% 
+  summarise(media_costes =mean(Coste))
+
+media_por_anyo
+```
+
+Calculo del "modelo de regresion lineal" para valorar la tendencia
+```{r}
+TMA <- lm(media_costes ~ Anyo, data=media_por_anyo)
+summary(TMA)
+```
+El ajuste de la tendencia media anual es Tt = -763.18877 + 0.38647*t, con un R2  94.71% por lo que la tendencia explica un 94.71% de la variablidad de la variable dependiente
+
+Realizamos la tendencia media por periodo
+
+Tti = Tt + (i-(m+1)/2)*(B/m)
+```{r}
+st$tendencia <- TMA$coefficients[1] + TMA$coefficients[2] * st$Anyo
+st$tendencia_per <- st$tendencia + (st$Trimestre - 5/2)*(TMA$coefficients[2]/4)
+
+head(st)
+```
+
+Representamos graficamente los datos y la tendencia
+```{r}
+ggplot(st)+
+  geom_line(color="blue", size=1, aes(tiempo, Coste))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Coste))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=tendencia_per))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=tendencia_per))+
+  theme_minimal()
+```
+El ajuste es bueno pero no capta la curvatura. "Sugerencia realizar la tendencia con alguna transformación". Como la logarítmica o la exponencial
+
+5)Elimina la tendencia que has estimado mediante Regresión Lineal
+Simple. Representa la serie sin tendencia y verifica que
+efectivamente la tendencia se ha eliminado.
+```{r}
+st$Elim_tend <- st$Coste/ st$tendencia_per
+
+#Representamos la serie sin tendencia
+ggplot(st)+
+  geom_line(color="red", size=1, aes(x=tiempo, y=Elim_tend))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=Elim_tend))+
+  theme_minimal()
+```
+Se detecta curvatura, nuestro modelo no nos está captando la curvatura de los datos. Los valores están cercanos del 1
+
+6) Calcula los índices de estacionalidad de la serie, elimina la
+estacionalidad y represéntala.
+
+Realizamos la media de cada trimestre de la serie sin tendencia
+```{r}
+media_trimestre <- st %>% 
+  group_by(Trimestre) %>% 
+  summarise(media_elim_tendencia = mean(Elim_tend))
+
+media_trimestre
+
+#Media de las medias anteriores
+media_total_trimes <- mean(media_trimestre$media_elim_tendencia)
+media_total_trimes
+
+IVE <- media_trimestre$media_elim_tendencia / media_total_trimes
+IVE*100
+```
+Primer trimestre: está 100 - 92.81066 = 7.18% por debajo de la tendencia media anual
+...
+Cuarto trimestre: está 6.17% por encima de la tendencia media anual
+
+
+Eliminamos la estacionalidad de los datos 
+```{r}
+st$serie_desest <- st$Coste / IVE
+
+#representamos la serie desestacionalizada
+ggplot(st)+
+  geom_line(color="red", size=1, aes(x=tiempo, y=serie_desest))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=serie_desest))+
+  theme_minimal()
+```
+La gráfica muestra la componente de la tendencia y la componente irregular después de eliminar la estacionalidad.
+
+7)  Estima el modelo y representa el modelo estimado junto con la
+variable costes.
+```{r}
+st$modelo <- st$tendencia_per * IVE 
+
+head(st)
+```
+Representamos 
+```{r}
+ggplot(st)+
+  geom_line(color="blue", size=1, aes(tiempo, Coste))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Coste))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=modelo))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=modelo))+
+  theme_minimal()
+```
+
+El ajuste es bueno, pero sigue apareciendo la curvatura en los datos que nuestro modelo no es capaz de captar.
+
+8) Elimina la tendencia y la componente estacional de los datos
+originales y representa estos valores. ¿Qué observas?
+
+Observamos la componente irregular
+```{r}
+st$errores <- st$Coste / st$modelo
+ggplot(st)+
+  geom_line(color="red", size=1, aes(x=tiempo, y=errores))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=errores))+
+  theme_minimal()
+```
+Debería ser un gráfico con puntos aleatorios alrededor del uno, pero aparece una curvatura, indicando que falta algo por estimar en la tendencia.
+
+9)Predice los costes por hora para el año 2016 y representa las
+predicciones.
+```{r}
+tendencia_2016 <- TMA$coefficients[1] + TMA$coefficients[2]*2016
+
+trimestre <- c(1,2,3,4)
+
+tendencia_per_2016 <- tendencia_2016 + (trimestre - 5/2)*(TMA$coefficients[2]/4)
+
+pred_2016 <- tendencia_per_2016 * IVE 
+pred_2016
+pred_2016 <- data.frame(modelo=pred_2016, tiempo = c(65,66,67,68))
+st <- bind_rows(st, pred_2016)
+tail(st)
+```
+```{r}
+
+ggplot(st)+
+  geom_line(color="blue", size=1, aes(tiempo, Coste))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Coste))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=modelo))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=modelo))+
+  theme_minimal()
+```
+Gráfico correspondiente a la predicción de los costes por hora para el año 2016 (linea roja) junto con la serie original (linea azul)
+
+
+
+Ejercicio 2
+
+La base de datos ventas.csv contiene información sobre las ventas (organizadas en
+cuatrimestres) de una empresa ficticia dedicada a la distribución de productos
+tecnológicos durante el período comprendido entre los años 2010 y 2015.
+
+
+Leemos la base de datos 
+```{r}
+datos_ventas <- read.table("ventas.csv", header = T, sep=";")
+View(datos_ventas)
+str(datos_ventas)
+
+```
+
+Representamos los datos
+```{r}
+datos_ventas$tiempo <- 1:length(datos_ventas$Ventas)
+
+ggplot(datos_ventas, aes(tiempo, Ventas))+
+  geom_line(color="blue", size=1)+
+  geom_point(color="darkblue", size=1)+
+  theme_minimal()
+```
+
+Observamos que la serie tiene componente estacional y tendencia. 
+
+2) Estima la tendencia de la serie mediante el método de Medias Móviles.
+Representa mediante un gráfico el ajuste de la tendencia mediante medias
+móviles.
+
+```{r}
+datos_ventas$MM3 <- rollmean(datos_ventas$Ventas, k=3, fill = NA, align = "center")
+```
+
+Representamos datos y media móvil
+```{r}
+ggplot(datos_ventas)+
+  geom_line(color="blue", size=1, aes(tiempo, Ventas))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Ventas))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=MM3))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=MM3))+
+  theme_minimal()
+```
+
+La media movil de periodo 3 ajusta bastante bien la tendencia 
+
+3)Elimina la tendencia que has estimado en el apartado anterior. Representa
+la serie sin tendencia.
+
+Al ser un modelo aditivo el modelo a ajustar es el siguiente Yti_pred = Tti + IdifE
+```{r}
+datos_ventas$Elim_tend <- datos_ventas$Ventas - datos_ventas$MM3
+
+#Representamos
+ggplot(datos_ventas)+
+  geom_line(color="orange", size=1, aes(tiempo, Elim_tend))+
+  geom_point(color="darkorange", size=1, aes(tiempo, Elim_tend))+
+  theme_minimal()
+```
+Está en una franja, esta bien estimada la tendencia
+
+4) Calcula los índices de estacionalidad de la serie, elimina la estacionalidad y
+represéntala.
+```{r}
+media_cuatrimestre <- datos_ventas %>% 
+  group_by(Cuatrimestre) %>% 
+  summarise(media_elim_tend = mean(Elim_tend, na.rm= T))
+
+media_cuatrimestre
+media_total_cuatrimes <- mean(media_cuatrimestre$media_elim_tend)
+
+idifE <- media_cuatrimestre$media_elim_tend - media_total_cuatrimes
+idifE
+```
+
+
+Eliminamos la estacionalidad
+```{r}
+datos_ventas$serie_desest <- datos_ventas$Ventas - idifE
+head(datos_ventas)
+
+
+```
+
+Representamos la serie desestacionalizada
+```{r}
+ggplot(datos_ventas)+
+  geom_line(color="orange", size=1, aes(tiempo, serie_desest))+
+  geom_point(color="darkorange", size=1, aes(tiempo, serie_desest))+
+  theme_minimal()
+```
+
+Lo que se observa es la componente irregular y la tendencia
+
+5. Estima el modelo y representa el modelo estimado junto con la variable
+ventas.
+```{r}
+datos_ventas$modelo <- datos_ventas$MM3 + idifE
+head(datos_ventas)
+
+#Representamos el modelo junto con la var. ventas
+ggplot(datos_ventas)+
+  geom_line(color="blue", size=1, aes(tiempo, Ventas))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Ventas))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=modelo))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=modelo))+
+  theme_minimal()
+```
+
+Observamos que el ajuste es muy bueno. El modelo se ajusta muy bien a nuestros datos
+
+6. Elimina la tendencia y la componente estacional de los datos originales y
+representa estos valores. ¿Qué observas?
+```{r}
+datos_ventas$errores <- datos_ventas$Ventas - datos_ventas$modelo 
+
+ggplot(datos_ventas)+
+  geom_line(color="red", size=1, aes(x=tiempo, y=errores))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=errores))+
+  theme_minimal()
+```
+Se observa la componente irregular. Se aprecia algo de curvatura por lo que falta algo por estimar en la tendencia

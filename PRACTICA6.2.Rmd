@@ -1,0 +1,131 @@
+---
+title: "PRACTICA6.2"
+output: html_document
+---
+
+Ejercicio 2
+La base de datos ventas.csv contiene información sobre las ventas (organizadas en
+cuatrimestres) de una empresa ficticia dedicada a la distribución de productos
+tecnológicos durante el período comprendido entre los años 2010 y 2015.
+
+Cargamos las librearías
+```{r}
+library(ggplot2)
+library(dplyr)
+library(zoo)
+```
+
+Leemos la base de datos 
+```{r}
+datos_ventas <- read.table("ventas.csv", header = T, sep=";")
+View(datos_ventas)
+str(datos_ventas)
+
+```
+
+Representamos los datos
+```{r}
+datos_ventas$tiempo <- 1:length(datos_ventas$Ventas)
+
+ggplot(datos_ventas, aes(tiempo, Ventas))+
+  geom_line(color="blue", size=1)+
+  geom_point(color="darkblue", size=1)+
+  theme_minimal()
+```
+
+2) Estima la tendencia de la serie mediante el método de Medias Móviles.
+Representa mediante un gráfico el ajuste de la tendencia mediante medias
+móviles.
+
+```{r}
+datos_ventas$MM3 <- rollmean(datos_ventas$Ventas, k=3, fill = NA, align = "center")
+```
+
+Representamos datos y media móvil
+```{r}
+ggplot(datos_ventas)+
+  geom_line(color="blue", size=1, aes(tiempo, Ventas))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Ventas))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=MM3))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=MM3))+
+  theme_minimal()
+```
+
+La media movil de periodo 3 ajusta bastante bien la tendencia 
+
+3)Elimina la tendencia que has estimado en el apartado anterior. Representa
+la serie sin tendencia.
+
+Al ser un modelo aditivo el modelo a ajustar es el siguiente Yti_pred = Tti + IdifE
+```{r}
+datos_ventas$Elim_tend <- datos_ventas$Ventas - datos_ventas$MM3
+
+#Representamos
+ggplot(datos_ventas)+
+  geom_line(color="orange", size=1, aes(tiempo, Elim_tend))+
+  geom_point(color="darkorange", size=1, aes(tiempo, Elim_tend))+
+  theme_minimal()
+```
+Está en una franja, esta bien estimada la tendencia
+
+4) Calcula los índices de estacionalidad de la serie, elimina la estacionalidad y
+represéntala.
+```{r}
+media_cuatrimestre <- datos_ventas %>% 
+  group_by(Cuatrimestre) %>% 
+  summarise(media_elim_tend = mean(Elim_tend, na.rm= T))
+
+media_cuatrimestre
+media_total_cuatrimes <- mean(media_cuatrimestre$media_elim_tend)
+
+idifE <- media_cuatrimestre$media_elim_tend - media_total_cuatrimes
+idifE
+```
+
+
+Eliminamos la estacionalidad
+```{r}
+datos_ventas$serie_desest <- datos_ventas$Ventas - idifE
+head(datos_ventas)
+
+
+```
+
+Representamos la serie desestacionalizada
+```{r}
+ggplot(datos_ventas)+
+  geom_line(color="orange", size=1, aes(tiempo, serie_desest))+
+  geom_point(color="darkorange", size=1, aes(tiempo, serie_desest))+
+  theme_minimal()
+```
+
+Lo que se observa es la componente irregular y la tendencia
+
+5. Estima el modelo y representa el modelo estimado junto con la variable
+ventas.
+```{r}
+datos_ventas$modelo <- datos_ventas$MM3 + idifE
+head(datos_ventas)
+
+#Representamos el modelo junto con la var. ventas
+ggplot(datos_ventas)+
+  geom_line(color="blue", size=1, aes(tiempo, Ventas))+
+  geom_point(color="darkblue", size=1, aes(tiempo, Ventas))+
+  geom_line(color="red", size=1, aes(x=tiempo, y=modelo))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=modelo))+
+  theme_minimal()
+```
+
+Observamos que el ajuste es muy bueno. El modelo se ajusta muy bien a nuestros datos
+
+6. Elimina la tendencia y la componente estacional de los datos originales y
+representa estos valores. ¿Qué observas?
+```{r}
+datos_ventas$errores <- datos_ventas$Ventas - datos_ventas$modelo 
+
+ggplot(datos_ventas)+
+  geom_line(color="red", size=1, aes(x=tiempo, y=errores))+
+  geom_point(color="darkred", size=1, aes(x=tiempo, y=errores))+
+  theme_minimal()
+```
+
